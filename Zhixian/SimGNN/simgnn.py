@@ -1,20 +1,12 @@
-import glob
-import time
-import math
 import torch
-import random
-import numpy as np
-from tqdm import tqdm, trange
-from torch_geometric.nn import GCNConv
 from layers import AttentionModule, TenorNetworkModule
-from utils import process_pair, calculate_loss, calculate_normalized_ged
 
 class SimGNN(torch.nn.Module):
     """
     SimGNN: A Neural Network Approach to Fast Graph Similarity Computation
     https://arxiv.org/abs/1808.05689
     """
-    def __init__(self, graph_size, feature_size, count_feature, count_size):
+    def __init__(self, graph_size, feature_size, count_size):
         """
         :param args: Arguments object.
         :param graph_size: Size of the graph
@@ -23,7 +15,6 @@ class SimGNN(torch.nn.Module):
         super().__init__()
         self.n = graph_size
         self.f = feature_size
-        self.count = count_features
         self.cf = count_size
         self.setup_layers()
 
@@ -32,66 +23,24 @@ class SimGNN(torch.nn.Module):
         Creating the layers.
         """
         self.attention = AttentionModule(self.n, self.f)
-        self.tensor_network = TenorNetworkModule(self.args)
-        self.fully_connected_first = torch.nn.Linear(self.feature_count, self.args.bottle_neck_neurons)
-        self.scoring_layer = torch.nn.Linear(self.args.bottle_neck_neurons, 1)
+        self.tensor_network = TenorNetworkModule(self.f + self.cf)
 
-    def calculate_histogram(self, abstract_features_1, abstract_features_2):
-        """
-        Calculate histogram from similarity matrix.
-        :param abstract_features_1: Feature matrix for graph 1.
-        :param abstract_features_2: Feature matrix for graph 2.
-        :return hist: Histsogram of similarity scores.
-        """
-        scores = torch.mm(abstract_features_1, abstract_features_2).detach()
-        scores = scores.view(-1,1)
-        hist = torch.histc(scores, bins=self.args.bins)
-        hist = hist/torch.sum(hist)
-        hist = hist.view(1,-1)
-        return hist
-
-    def convolutional_pass(self, edge_index, features):
-        """
-        Making convolutional pass.
-        :param edge_index: Edge indices.
-        :param features: Feature matrix.
-        :return features: Absstract feature matrix.
-        """
-        features = self.convolution_1(features, edge_index)
-        features = torch.nn.functional.relu(features)
-        features = torch.nn.functional.dropout(features, training=self.training)
-        features = self.convolution_2(features, edge_index)
-        features = torch.nn.functional.relu(features)
-        features = torch.nn.functional.dropout(features, training=self.training)
-        features = self.convolution_3(features, edge_index)
-        return features
-
-    def forward(self, data):
-        """
-        Forward pass with graphs.
-        :param data: Data dictiyonary.
-        :return score: Similarity score.
-        """
-        edge_index_1 = data["edge_index_1"]
-        edge_index_2 = data["edge_index_2"]
-        features_1 = data["features_1"]
-        features_2 = data["features_2"]
-        abstract_features_1 = self.convolutional_pass(edge_index_1, features_1)
-        abstract_features_2 = self.convolutional_pass(edge_index_2, features_2)
+    def count_subgraph(g, self):
+        a = g
+        f = torch.zeros([self.cf, 1])
+        for i in range(self.cf):
+            a = torch.matmul(a, g)
+            f[i, 0] = torch.trace(a)
+        return f
         
-        if self.args.histogram == True:
-            hist =self.calculate_histogram(abstract_features_1, torch.t(abstract_features_2))
+    def forward(self, g1, g0):
         
-        pooled_features_1 =  self.attention(abstract_features_1)
-        pooled_features_2 = self.attention(abstract_features_2)
-        scores = self.tensor_network(pooled_features_1, pooled_features_2)
-        scores = torch.t(scores)
-        
-        if self.args.histogram == True:
-            scores = torch.cat((scores,hist),dim=1).view(1,-1)
-            
-        scores = torch.nn.functional.relu(self.fully_connected_first(scores))
-        score = torch.sigmoid(self.scoring_layer(scores))
+        pooled_features_1 =  self.attention(g1)
+        pooled_features_2 = self.attention(g2)
+        if count_size > 0:
+            pooled_features_1 = torch.cat((pooled_features_1, self.count_subgraph(g1)), dim=0)
+            pooled_features_2 = torch.cat((pooled_features_2, self.count_subgraph(g2)), dim=0) 
+        score = self.tensor_network(pooled_features_1, pooled_features_2)
         return score
 
 class SimGNNTrainer(object):

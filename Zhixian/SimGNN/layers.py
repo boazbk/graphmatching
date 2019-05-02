@@ -36,18 +36,19 @@ class AttentionModule(torch.nn.Module):
         transformed_global = torch.tanh(global_context)
         sigmoid_scores = torch.sigmoid(torch.matmul(embedding,transformed_global.view(self.f, -1, 1)))
         representation = torch.matmul(torch.t(embedding),sigmoid_scores)
-        return representation
+        representation = torch.mean(representation.view(self.f, -1), dim=1)
+        return representation.view(-1, 1)
 
 class TenorNetworkModule(torch.nn.Module):
     """
     SimGNN Tensor Network module to calculate similarity vector.
     """
-    def __init__(self,args):
+    def __init__(self, f):
         """
         :param args: Arguments object.
         """
-        super(TenorNetworkModule, self).__init__()
-        self.args = args
+        super().__init__()
+        self.f = f
         self.setup_weights()
         self.init_parameters()
 
@@ -55,16 +56,14 @@ class TenorNetworkModule(torch.nn.Module):
         """
         Defining weights.
         """
-        self.weight_matrix = torch.nn.Parameter(torch.Tensor(self.args.filters_3, self.args.filters_3, self.args.tensor_neurons))
-        self.weight_matrix_block = torch.nn.Parameter(torch.Tensor(self.args.tensor_neurons, 2*self.args.filters_3))
-        self.bias = torch.nn.Parameter(torch.Tensor(self.args.tensor_neurons, 1))
+        self.weight_matrix = torch.nn.Parameter(torch.zeros([2, self.f, self.f]))
+        self.bias = torch.nn.Parameter(torch.zeros([2, 1]))
 
     def init_parameters(self):
         """
         Initializing weights.
         """
         torch.nn.init.xavier_uniform_(self.weight_matrix)
-        torch.nn.init.xavier_uniform_(self.weight_matrix_block)
         torch.nn.init.xavier_uniform_(self.bias)
 
     def forward(self, embedding_1, embedding_2):
@@ -74,9 +73,7 @@ class TenorNetworkModule(torch.nn.Module):
         :param embedding_2: Result of the 2nd embedding after attention.
         :return scores: A similarity score vector.
         """
-        scoring = torch.mm(torch.t(embedding_1), self.weight_matrix.view(self.args.filters_3,-1)).view(self.args.filters_3, self.args.tensor_neurons)
-        scoring = torch.mm(torch.t(scoring), embedding_2)
-        combined_representation = torch.cat((embedding_1, embedding_2))
-        block_scoring = torch.mm(self.weight_matrix_block, combined_representation)
-        scores = torch.nn.functional.relu(scoring + block_scoring  + self.bias)
-        return scores
+        scoring = torch.matmul(torch.t(embedding_1), self.weight_matrix)
+        scoring = torch.matmul(scoring, embedding_2)
+        scores = scoring.view(-1, 1) + self.bias
+        return scores.view
