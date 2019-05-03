@@ -1,5 +1,7 @@
 import torch
-from layers import AttentionModule, TenorNetworkModule
+import matplotlib
+from layers import ConvolutionModule, AttentionModule, TensorNetworkModule
+import matplotlib.pyplot as plt
 
 class SimGNN(torch.nn.Module):
     """
@@ -22,10 +24,20 @@ class SimGNN(torch.nn.Module):
         """
         Creating the layers.
         """
+        self.conv1 = ConvolutionModule(self.n, self.f)
+        self.conv2 = ConvolutionModule(self.n, self.f)
+        self.conv3 = ConvolutionModule(self.n, self.f)
         self.attention = AttentionModule(self.n, self.f)
-        self.tensor_network = TenorNetworkModule(self.f + self.cf)
+        self.tensor_network = TensorNetworkModule(self.f + self.cf)
 
-    def count_subgraph(g, self):
+    def reset_parameters(self):
+        self.conv1.init_parameters()
+        self.conv2.init_parameters()
+        self.conv3.init_parameters()
+        self.attention.init_parameters()
+        self.tensor_network.init_parameters()
+
+    def count_subgraph(self, g):
         a = g
         f = torch.zeros([self.cf, 1])
         for i in range(self.cf):
@@ -33,141 +45,107 @@ class SimGNN(torch.nn.Module):
             f[i, 0] = torch.trace(a)
         return f
         
-    def forward(self, g1, g0):
-        
-        pooled_features_1 =  self.attention(g1)
-        pooled_features_2 = self.attention(g2)
-        if count_size > 0:
+    def forward(self, g1, g2):
+        features_1 = self.conv3(self.conv2(self.conv1(g1)))
+        features_2 = self.conv3(self.conv2(self.conv1(g2)))
+        pooled_features_1 = self.attention(features_1)
+        pooled_features_2 = self.attention(features_2)
+        if self.cf > 0:
             pooled_features_1 = torch.cat((pooled_features_1, self.count_subgraph(g1)), dim=0)
             pooled_features_2 = torch.cat((pooled_features_2, self.count_subgraph(g2)), dim=0) 
         score = self.tensor_network(pooled_features_1, pooled_features_2)
+        # print(pooled_features_1, pooled_features_2, score)
         return score
 
 class SimGNNTrainer(object):
     """
     SimGNN model trainer.
     """
-    def __init__(self, args):
+    def __init__(self, n, feature_size, count_size, repeat):
         """
         :param args: Arguments object.
         """
-        self.args = args
-        self.initial_label_enumeration()
+        self.n = n
+        self.f = feature_size
+        self.cf = count_size
+        self.r = repeat
         self.setup_model()
 
     def setup_model(self):
         """
         Creating a SimGNN.
         """
-        self.model = SimGNN(self.args, self.number_of_labels)
+        self.model = SimGNN(self.n, self.f, self.cf)
+        self.criterion = torch.nn.CrossEntropyLoss()
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.1)
         
-    def initial_label_enumeration(self):
-        """
-        Collecting the unique node idsentifiers.
-        """
-        print("\nEnumerating unique labels.\n")
-        self.training_graphs = glob.glob(self.args.training_graphs + "*.json")
-        self.testing_graphs = glob.glob(self.args.testing_graphs + "*.json")
-        graph_pairs = self.training_graphs + self.testing_graphs
-        self.global_labels = set()
-        for graph_pair in tqdm(graph_pairs):
-            data = process_pair(graph_pair)
-            self.global_labels = self.global_labels.union(set(data["labels_1"]))
-            self.global_labels = self.global_labels.union(set(data["labels_2"]))
-        self.global_labels = list(self.global_labels)
-        self.global_labels = {val:index  for index, val in enumerate(self.global_labels)}
-        self.number_of_labels = len(self.global_labels)
-         
-    def create_batches(self):
-        """
-        Creating batches from the training graph list.
-        :return batches: List of lists with batches.
-        """
-        random.shuffle(self.training_graphs)
-        batches = [self.training_graphs[graph:graph+self.args.batch_size] for graph in range(0, len(self.training_graphs), self.args.batch_size)]
-        return batches
-
-    def transfer_to_torch(self, data):
-        """
-        Transferring the data to torch and creating a hash table with the indices, features and target.
-        :param data: Data dictionary.
-        :return new_data: Dictionary of Torch Tensors.
-        """
-        new_data = dict()
-        edges_1 = torch.from_numpy(np.array(data["graph_1"], dtype=np.int64).T).type(torch.long)
-        edges_2 = torch.from_numpy(np.array(data["graph_2"], dtype=np.int64).T).type(torch.long)
-
-        features_1 = torch.FloatTensor(np.array([[ 1.0 if self.global_labels[node] == label_index else 0 for label_index in self.global_labels.values()] for node in data["labels_1"]]))
-        features_2 = torch.FloatTensor(np.array([[ 1.0 if self.global_labels[node] == label_index else 0 for label_index in self.global_labels.values()] for node in data["labels_2"]]))
-        new_data["edge_index_1"] = edges_1
-        new_data["edge_index_2"] = edges_2
-        new_data["features_1"] = features_1
-        new_data["features_2"] = features_2
-        normalized_ged = data["ged"]/(0.5*(len(data["labels_1"])+len(data["labels_2"])))
-        new_data["target"] =  torch.from_numpy(np.exp(-normalized_ged).reshape(1,1)).view(-1).float()
-        return new_data
-
-    def process_batch(self, batch):
-        """
-        Forward pass with a batch of data.
-        :param batch: Batch of graph pair locations.
-        :return loss: Loss on the batch. 
-        """
-        self.optimizer.zero_grad()
-        losses = 0
-        for graph_pair in batch:
-            data = process_pair(graph_pair)
-            data = self.transfer_to_torch(data)
-            target = data["target"]
-            prediction = self.model(data)
-            losses = losses + torch.nn.functional.mse_loss(data["target"], prediction)
-        losses.backward(retain_graph = True)
-        self.optimizer.step()
-        loss = losses.item()
-        return loss
-
-    def fit(self):
+    def train(self, prob, noise):
         """
         Training a model.
         """
-        print("\nModel training.\n")
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate, weight_decay=self.args.weight_decay)
-        self.model.train()
-        epochs = trange(self.args.epochs, leave=True, desc = "Epoch")
-        main_index = 0
-        for epoch in epochs:
-            batches = self.create_batches()
-            self.loss_sum = 0
-            for index, batch in tqdm(enumerate(batches), total=len(batches), desc = "Batches"):
-                loss_score = self.process_batch(batch)
-                main_index = main_index + len(batch)
-                self.loss_sum = self.loss_sum + loss_score
-            loss = self.loss_sum/main_index
-            epochs.set_description("Epoch (Loss=%g)" % round(loss,5))
+        def symmetrize(m):
+            mu = torch.triu(m, diagonal=1)
+            return mu + torch.t(mu)
 
-    def score(self):
-        """
-        Scoring on the test set.
-        """
-        print("\n\nModel evaluation.\n")
-        self.model.eval()
-        self.scores = []
-        self.ground_truth = []
-        for graph_pair in tqdm(self.testing_graphs):
-            data = process_pair(graph_pair)
-            self.ground_truth.append(calculate_normalized_ged(data))
-            data = self.transfer_to_torch(data)
-            target = data["target"]
-            prediction = self.model(data)
-            self.scores.append(calculate_loss(prediction, target))
-        self.print_evaluation()
+        self.model.reset_parameters()
+        for repeat in range(self.r):
+            g = (torch.rand(self.n, self.n) < prob)
+            m = (torch.rand(self.n, self.n) < (1 - noise))
+            g1 = (g * m)
+            m = (torch.rand(self.n, self.n) < (1 - noise))
+            g2 = (g * m)
+            g1 = symmetrize(g1)
+            g2 = symmetrize(g2)
+            g10 = (torch.rand(self.n, self.n) < (1 - noise) * prob)
+            g20 = (torch.rand(self.n, self.n) < (1 - noise) * prob)
+            g10 = symmetrize(g10)
+            g20 = symmetrize(g20)
+            self.optimizer.zero_grad()
+            # print(g1, g2, g10, g20)
+            output1 = self.model(g1.float(), g2.float())
+            loss1 = self.criterion(output1.view(1, -1), torch.tensor([1]))
+            output0 = self.model(g10.float(), g20.float())
+            loss0 = self.criterion(output0.view(1, -1), torch.tensor([0]))
+            loss = loss0 + loss1
+            loss.backward()
+            self.optimizer.step()
+            # print(output1, output0)
 
-    def print_evaluation(self):
-        """
-        Printing the error rates.
-        """
-        norm_ged_mean = np.mean(self.ground_truth)
-        base_error= np.mean([(n-norm_ged_mean)**2 for n in self.ground_truth])
-        model_error = np.mean(self.scores)
-        print("\nBaseline error: " +str(round(base_error,5))+".")
-        print("\nModel test error: " +str(round(model_error,5))+".")
+    def test(self, prob, noise):
+        
+        def symmetrize(m):
+            mu = torch.triu(m, diagonal=1)
+            return mu + torch.t(mu)
+
+        error = 0
+        for repeat in range(100):
+            g = (torch.rand(self.n, self.n) < prob)
+            m = (torch.rand(self.n, self.n) < (1 - noise))
+            g1 = g * m
+            m = (torch.rand(self.n, self.n) < (1 - noise))
+            g2 = g * m
+            g1 = symmetrize(g1)
+            g2 = symmetrize(g2)
+            g10 = (torch.rand(self.n, self.n) < (1 - noise) * prob)
+            g20 = (torch.rand(self.n, self.n) < (1 - noise) * prob)
+            g10 = symmetrize(g10)
+            g20 = symmetrize(g20)
+            output1 = self.model(g1.float(), g2.float()).view(-1)
+            error += 1 if output1[1] < output1[0] else 0
+            output0 = self.model(g10.float(), g20.float()).view(-1)
+            error += 1 if output0[0] < output0[1] else 0
+            # print(output1, output0)
+        return error / 200
+
+
+if __name__ == "__main__":
+    dnn = SimGNNTrainer(10, 0, 5, 1000)
+    result = []
+    for r in range(10):
+        dnn.train(0.3, r / 10)
+        result.append(1 - dnn.test(0.3, r / 10))
+        print(r)
+    print(result)
+    #plt.plot(result)
+    #plt.show()
+    

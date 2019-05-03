@@ -1,5 +1,25 @@
 import torch
 
+class ConvolutionModule(torch.nn.Module):
+
+    def __init__(self, n, f):
+        super().__init__()
+        self.n = n
+        self.f = f
+        self.setup_weights()
+        self.init_parameters()
+
+    def setup_weights(self):
+        self.weight_matrix = torch.nn.Parameter(torch.empty([self.f, self.n, self.n]))
+
+    def init_parameters(self):
+        torch.nn.init.normal_(self.weight_matrix)
+
+    def forward(self, embedding):
+        context = torch.matmul(embedding, self.weight_matrix)
+        representation = torch.sigmoid(context)
+        return representation
+
 class AttentionModule(torch.nn.Module):
     """
     SimGNN Attention Module to make a pass on graph.
@@ -18,13 +38,13 @@ class AttentionModule(torch.nn.Module):
         """
         Defining weights.
         """
-        self.weight_matrix = torch.nn.Parameter(torch.zeros([self.f, self.n, self.n])) 
+        self.weight_matrix = torch.nn.Parameter(torch.empty([self.n, self.n])) 
         
     def init_parameters(self):
         """
         Initializing weights.
         """
-        torch.nn.init.xavier_uniform_(self.weight_matrix)
+        torch.nn.init.normal_(self.weight_matrix)
 
     def forward(self, embedding):
         """
@@ -32,14 +52,15 @@ class AttentionModule(torch.nn.Module):
         :param embedding: Result of the GCN.
         :return representation: A graph level representation vector. 
         """
-        global_context = torch.mean(torch.matmul(embedding, self.weight_matrix), dim=1)
-        transformed_global = torch.tanh(global_context)
-        sigmoid_scores = torch.sigmoid(torch.matmul(embedding,transformed_global.view(self.f, -1, 1)))
-        representation = torch.matmul(torch.t(embedding),sigmoid_scores)
-        representation = torch.mean(representation.view(self.f, -1), dim=1)
+        # print(embedding)
+        # print(self.weight_matrix)
+        global_context = torch.mean(torch.matmul(embedding, self.weight_matrix), dim=2)
+        sigmoid_scores = torch.sigmoid(global_context)
+        representation = torch.matmul(embedding,sigmoid_scores.view(self.f, self.n, 1))
+        representation = torch.matmul(sigmoid_scores.view(self.f, 1, self.n), representation.view(self.f, self.n, 1))
         return representation.view(-1, 1)
 
-class TenorNetworkModule(torch.nn.Module):
+class TensorNetworkModule(torch.nn.Module):
     """
     SimGNN Tensor Network module to calculate similarity vector.
     """
@@ -56,15 +77,15 @@ class TenorNetworkModule(torch.nn.Module):
         """
         Defining weights.
         """
-        self.weight_matrix = torch.nn.Parameter(torch.zeros([2, self.f, self.f]))
-        self.bias = torch.nn.Parameter(torch.zeros([2, 1]))
+        self.weight_matrix = torch.nn.Parameter(torch.empty([2, 2 * self.f, 2 * self.f]))
+        self.bias = torch.nn.Parameter(torch.empty([2, 1]))
 
     def init_parameters(self):
         """
         Initializing weights.
         """
-        torch.nn.init.xavier_uniform_(self.weight_matrix)
-        torch.nn.init.xavier_uniform_(self.bias)
+        torch.nn.init.normal_(self.weight_matrix)
+        torch.nn.init.normal_(self.bias)
 
     def forward(self, embedding_1, embedding_2):
         """
@@ -73,7 +94,15 @@ class TenorNetworkModule(torch.nn.Module):
         :param embedding_2: Result of the 2nd embedding after attention.
         :return scores: A similarity score vector.
         """
-        scoring = torch.matmul(torch.t(embedding_1), self.weight_matrix)
-        scoring = torch.matmul(scoring, embedding_2)
+        embedding = torch.cat((embedding_1, embedding_2), dim = 0)
+        scoring = torch.matmul(torch.t(embedding), self.weight_matrix)
+        scoring = torch.matmul(scoring, embedding)
         scores = scoring.view(-1, 1) + self.bias
-        return scores.view
+        return scores
+
+if __name__ == "__main__":
+    g = torch.rand(100, 100)
+    g1 = torch.rand(100, 100)
+    model = AttentionModule(100, 2)
+    model1 = TensorNetworkModule(2)
+    print(model1(model(g), model(g1)))
