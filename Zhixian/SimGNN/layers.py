@@ -13,7 +13,7 @@ class ConvolutionModule(torch.nn.Module):
         self.weight_matrix = torch.nn.Parameter(torch.empty([self.f, self.n, self.n]))
 
     def init_parameters(self):
-        torch.nn.init.normal_(self.weight_matrix)
+        torch.nn.init.normal_(self.weight_matrix, std=0.1)
 
     def forward(self, embedding):
         context = torch.matmul(embedding, self.weight_matrix)
@@ -38,13 +38,13 @@ class AttentionModule(torch.nn.Module):
         """
         Defining weights.
         """
-        self.weight_matrix = torch.nn.Parameter(torch.empty([self.n, self.n])) 
+        self.weight_matrix = torch.nn.Parameter(torch.empty([self.f, self.n, self.n])) 
         
     def init_parameters(self):
         """
         Initializing weights.
         """
-        torch.nn.init.normal_(self.weight_matrix)
+        torch.nn.init.normal_(self.weight_matrix, std=0.1)
 
     def forward(self, embedding):
         """
@@ -84,8 +84,8 @@ class TensorNetworkModule(torch.nn.Module):
         """
         Initializing weights.
         """
-        torch.nn.init.normal_(self.weight_matrix)
-        torch.nn.init.normal_(self.bias)
+        torch.nn.init.normal_(self.weight_matrix, std=0.1)
+        torch.nn.init.normal_(self.bias, std=1)
 
     def forward(self, embedding_1, embedding_2):
         """

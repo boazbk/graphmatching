@@ -1,5 +1,4 @@
 import torch
-import matplotlib
 from layers import ConvolutionModule, AttentionModule, TensorNetworkModule
 import matplotlib.pyplot as plt
 
@@ -38,10 +37,10 @@ class SimGNN(torch.nn.Module):
         self.tensor_network.init_parameters()
 
     def count_subgraph(self, g):
-        a = g
+        a = g / self.n * 2
         f = torch.zeros([self.cf, 1])
         for i in range(self.cf):
-            a = torch.matmul(a, g)
+            a = torch.matmul(a, g) / self.n * 2
             f[i, 0] = torch.trace(a)
         return f
         
@@ -88,28 +87,30 @@ class SimGNNTrainer(object):
             return mu + torch.t(mu)
 
         self.model.reset_parameters()
-        for repeat in range(self.r):
-            g = (torch.rand(self.n, self.n) < prob)
-            m = (torch.rand(self.n, self.n) < (1 - noise))
-            g1 = (g * m)
-            m = (torch.rand(self.n, self.n) < (1 - noise))
-            g2 = (g * m)
-            g1 = symmetrize(g1)
-            g2 = symmetrize(g2)
-            g10 = (torch.rand(self.n, self.n) < (1 - noise) * prob)
-            g20 = (torch.rand(self.n, self.n) < (1 - noise) * prob)
-            g10 = symmetrize(g10)
-            g20 = symmetrize(g20)
+        for repeat in range(self.r // 10):
             self.optimizer.zero_grad()
-            # print(g1, g2, g10, g20)
-            output1 = self.model(g1.float(), g2.float())
-            loss1 = self.criterion(output1.view(1, -1), torch.tensor([1]))
-            output0 = self.model(g10.float(), g20.float())
-            loss0 = self.criterion(output0.view(1, -1), torch.tensor([0]))
-            loss = loss0 + loss1
+            loss = 0
+            for i in range(10):
+                g = (torch.rand(self.n, self.n) < prob)
+                m = (torch.rand(self.n, self.n) < (1 - noise))
+                g1 = (g * m)
+                m = (torch.rand(self.n, self.n) < (1 - noise))
+                g2 = (g * m)
+                g1 = symmetrize(g1)
+                g2 = symmetrize(g2)
+                r = torch.randperm(self.n)
+                g2 = g2[r][:, r]
+                g10 = (torch.rand(self.n, self.n) < (1 - noise) * prob)
+                g20 = (torch.rand(self.n, self.n) < (1 - noise) * prob)
+                g10 = symmetrize(g10)
+                g20 = symmetrize(g20)
+                output1 = self.model(g1.float(), g2.float())
+                loss1 = self.criterion(output1.view(1, -1), torch.tensor([1]))
+                output0 = self.model(g10.float(), g20.float())
+                loss0 = self.criterion(output0.view(1, -1), torch.tensor([0]))
+                loss += loss0 + loss1
             loss.backward()
             self.optimizer.step()
-            # print(output1, output0)
 
     def test(self, prob, noise):
         
@@ -131,15 +132,17 @@ class SimGNNTrainer(object):
             g10 = symmetrize(g10)
             g20 = symmetrize(g20)
             output1 = self.model(g1.float(), g2.float()).view(-1)
+            # print(1, output1)
             error += 1 if output1[1] < output1[0] else 0
             output0 = self.model(g10.float(), g20.float()).view(-1)
+            # print(0, output0)
             error += 1 if output0[0] < output0[1] else 0
             # print(output1, output0)
         return error / 200
 
 
 if __name__ == "__main__":
-    dnn = SimGNNTrainer(10, 0, 5, 1000)
+    dnn = SimGNNTrainer(10, 0, 5, 10000)
     result = []
     for r in range(10):
         dnn.train(0.3, r / 10)
