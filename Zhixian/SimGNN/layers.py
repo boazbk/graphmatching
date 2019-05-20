@@ -11,12 +11,15 @@ class ConvolutionModule(torch.nn.Module):
 
     def setup_weights(self):
         self.weight_matrix = torch.nn.Parameter(torch.empty([self.f, self.n, self.n]))
+        self.bias = torch.nn.Parameter(torch.empty([self.f, 1, 1]))
 
     def init_parameters(self):
-        torch.nn.init.normal_(self.weight_matrix, std=0.1)
+        torch.nn.init.normal_(self.weight_matrix, std=1)
+        torch.nn.init.normal_(self.bias, std=1)
 
     def forward(self, embedding):
         context = torch.matmul(embedding, self.weight_matrix)
+        context += self.bias
         representation = torch.sigmoid(context)
         return representation
 
@@ -38,13 +41,15 @@ class AttentionModule(torch.nn.Module):
         """
         Defining weights.
         """
-        self.weight_matrix = torch.nn.Parameter(torch.empty([self.f, self.n, self.n])) 
+        self.weight_matrix = torch.nn.Parameter(torch.empty([self.f, self.n, self.n]))
+        self.bias = torch.nn.Parameter(torch.empty([self.f, 1]))
         
     def init_parameters(self):
         """
         Initializing weights.
         """
-        torch.nn.init.normal_(self.weight_matrix, std=0.1)
+        torch.nn.init.normal_(self.weight_matrix, std=1)
+        torch.nn.init.normal_(self.bias, std=1)
 
     def forward(self, embedding):
         """
@@ -55,7 +60,7 @@ class AttentionModule(torch.nn.Module):
         # print(embedding)
         # print(self.weight_matrix)
         global_context = torch.mean(torch.matmul(embedding, self.weight_matrix), dim=2)
-        sigmoid_scores = torch.sigmoid(global_context)
+        sigmoid_scores = torch.sigmoid(global_context + self.bias)
         representation = torch.matmul(embedding,sigmoid_scores.view(self.f, self.n, 1))
         representation = torch.matmul(sigmoid_scores.view(self.f, 1, self.n), representation.view(self.f, self.n, 1))
         return representation.view(-1, 1)
@@ -78,13 +83,13 @@ class TensorNetworkModule(torch.nn.Module):
         Defining weights.
         """
         self.weight_matrix = torch.nn.Parameter(torch.empty([2, 2 * self.f, 2 * self.f]))
-        self.bias = torch.nn.Parameter(torch.empty([2, 1]))
+        self.bias = torch.nn.Parameter(torch.empty([1, 2]))
 
     def init_parameters(self):
         """
         Initializing weights.
         """
-        torch.nn.init.normal_(self.weight_matrix, std=0.1)
+        torch.nn.init.normal_(self.weight_matrix, std=1)
         torch.nn.init.normal_(self.bias, std=1)
 
     def forward(self, embedding_1, embedding_2):
@@ -97,7 +102,7 @@ class TensorNetworkModule(torch.nn.Module):
         embedding = torch.cat((embedding_1, embedding_2), dim = 0)
         scoring = torch.matmul(torch.t(embedding), self.weight_matrix)
         scoring = torch.matmul(scoring, embedding)
-        scores = scoring.view(-1, 1) + self.bias
+        scores = scoring.view(1, -1) + self.bias
         return scores
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ def maximumMatching(v0, v1):
     rowind, colind = linear_sum_assignment(cost)
     # print(cost)
     return sum(rowind == colind)
-    
+
 def subgraphPrecision(n, p, rs, repeat, length):
     precision = []
     for r in np.linspace(1, 0.1, rs):
@@ -41,8 +41,8 @@ def subgraphPrecision(n, p, rs, repeat, length):
             hist1 = countSubgraph(g1, length)
             hist2 = countSubgraph(g2, length)
             # print(hist1, hist2)
-            hist1 = hist1 / np.sum(hist1, axis=0)
-            hist2 = hist2 / np.sum(hist2, axis=0)
+            hist1 = hist1 / (np.sum(hist1, axis=0) + 1)
+            hist2 = hist2 / (np.sum(hist2, axis=0) + 1)
             hist1 = np.sum(hist1, axis=1)
             hist2 = np.sum(hist2, axis=1)
             hist1 = np.sort(hist1)
@@ -50,8 +50,8 @@ def subgraphPrecision(n, p, rs, repeat, length):
             # print(hist1, hist2)
             hist10 = countSubgraph(g10, length)
             hist20 = countSubgraph(g20, length)
-            hist10 = hist10 / np.sum(hist10, axis=0)
-            hist20 = hist20 / np.sum(hist20, axis=0)
+            hist10 = hist10 / (np.sum(hist10, axis=0) + 1)
+            hist20 = hist20 / (np.sum(hist20, axis=0) + 1)
             hist10 = np.sum(hist10, axis=1)
             hist20 = np.sum(hist20, axis=1)
             hist10 = np.sort(hist10)
