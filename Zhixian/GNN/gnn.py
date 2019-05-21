@@ -1,13 +1,13 @@
 import torch
-from layers import ConvolutionModule, AttentionModule, TensorNetworkModule
+from layers import AggregateModule
 import matplotlib.pyplot as plt
 
-class SimGNN(torch.nn.Module):
+class GNN(torch.nn.Module):
     """
     SimGNN: A Neural Network Approach to Fast Graph Similarity Computation
     https://arxiv.org/abs/1808.05689
     """
-    def __init__(self, graph_size, feature_size, count_size):
+    def __init__(self, graph_size, feature_size):
         """
         :param args: Arguments object.
         :param graph_size: Size of the graph
@@ -16,88 +16,45 @@ class SimGNN(torch.nn.Module):
         super().__init__()
         self.n = graph_size
         self.f = feature_size
-        self.cf = count_size
         self.setup_layers()
 
     def setup_layers(self):
         """
         Creating the layers.
         """
-        self.conv1 = ConvolutionModule(self.n, self.f)
-        self.conv2 = ConvolutionModule(self.n, self.f)
-        self.conv3 = ConvolutionModule(self.n, self.f)
-        self.attention = AttentionModule(self.n, self.f)
-        self.tensor_network = TensorNetworkModule(self.f + self.cf)
-        self.linear = torch.nn.Linear(2 * (self.f + self.cf), 2)
+        self.embedding0 = torch.nn.Parameter(torch.empty([self.f, self.n]))
+        self.aggr = AggregateModule(self.n, self.f)
+        self.linear = torch.nn.Linear(2 * self.f, 2)
 
     def reset_parameters(self):
-        self.conv1.init_parameters()
-        self.conv2.init_parameters()
-        self.conv3.init_parameters()
-        self.attention.init_parameters()
-        self.tensor_network.init_parameters()
+        torch.nn.init.normal_(self.embedding0, std=1)
+        self.aggr.init_parameters()
         torch.nn.init.normal_(self.linear.weight, std=1)
         torch.nn.init.normal_(self.linear.bias, std=1)
-
-    def count_subgraph(self, g):
-        a = g / self.n * 2
-        f = torch.zeros([self.cf, 1])
-        for i in range(self.cf):
-            a = torch.matmul(a, g) / (self.n * 0.3)
-            f[i, 0] = torch.trace(a)
-        return f
         
     def forward(self, g1, g2):
-        features_1 = self.conv1(g1)
-        features_1 = torch.nn.functional.relu(features_1)
-        features_1 = torch.nn.functional.dropout(features_1)
-        features_1 = self.conv2(features_1)
-        features_1 = torch.nn.functional.relu(features_1)
-        features_1 = torch.nn.functional.dropout(features_1)
-        features_1 = self.conv3(features_1)
-        features_2 = self.conv1(g2)
-        features_2 = torch.nn.functional.relu(features_2)
-        features_2 = torch.nn.functional.dropout(features_2)
-        features_2 = self.conv2(features_2)
-        features_2 = torch.nn.functional.relu(features_2)
-        features_2 = torch.nn.functional.dropout(features_2)
-        features_2 = self.conv3(features_2)
-        # print(features_1)
-        # print(features_2)
-        pooled_features_1 = self.attention(features_1)
-        pooled_features_2 = self.attention(features_2)
-        # print(pooled_features_1)
-        # print(pooled_features_2)
-        if self.cf > 0:
-            #print(g1)
-            #print(g2)
-            #print(self.count_subgraph(g1))
-            #print(self.count_subgraph(g2))
-            pooled_features_1 = torch.cat((pooled_features_1, self.count_subgraph(g1)), dim=0)
-            pooled_features_2 = torch.cat((pooled_features_2, self.count_subgraph(g2)), dim=0)
-            # print(pooled_features_1, pooled_features_2)
-        score = self.tensor_network(pooled_features_1, pooled_features_2)
-        # print(score)
-        # print(score)
-        pooled_features = torch.cat((pooled_features_1, pooled_features_2),dim=0)
-        # print(self.linear(pooled_features.view(1, -1)))
-        score += self.linear(pooled_features.view(1, -1))
-        # print(score)
-                                    
-        # print(pooled_features_1, pooled_features_2, score)
+        feature_1 = self.embedding0
+        feature_2 = self.embedding0
+        for i in range(5):
+            feature_1 = self.aggr(feature_1, g1)
+            feature_2 = self.aggr(feature_2, g2)
+        feature_1 = torch.mean(feature_1, dim=1)
+        feature_2 = torch.mean(feature_2, dim=1)
+        combine = torch.cat([feature_1, feature_2], dim=0)
+        combine = combine.view(1, -1)
+        score = self.linear(combine)
         return score
-
-class SimGNNTrainer(object):
+        
+class GNNTrainer(object):
     """
     SimGNN model trainer.
     """
-    def __init__(self, n, feature_size, count_size, repeat):
+    def __init__(self, n, feature_size, repeat):
         """
         :param args: Arguments object.
         """
         self.n = n
         self.f = feature_size
-        self.cf = count_size
         self.r = repeat
         self.setup_model()
 
@@ -105,7 +62,7 @@ class SimGNNTrainer(object):
         """
         Creating a SimGNN.
         """
-        self.model = SimGNN(self.n, self.f, self.cf)
+        self.model = GNN(self.n, self.f)
         self.criterion = torch.nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
         
@@ -120,9 +77,11 @@ class SimGNNTrainer(object):
 
         self.model.reset_parameters()
         for repeat in range(self.r // 10):
+            # print(repeat)
             self.optimizer.zero_grad()
             loss = 0
             for i in range(10):
+                # print("hello")
                 g = (torch.rand(self.n, self.n) < prob)
                 m = (torch.rand(self.n, self.n) < (1 - noise))
                 g1 = (g * m)
@@ -179,16 +138,3 @@ class SimGNNTrainer(object):
             error += 1 if output0[0] < output0[1] else 0
             # print(output1, output0)
         return error / 200
-
-
-if __name__ == "__main__":
-    dnn = SimGNNTrainer(10, 0, 5, 10000)
-    result = []
-    for r in range(10):
-        dnn.train(0.3, r / 10)
-        result.append(1 - dnn.test(0.3, r / 10))
-        print(r)
-    print(result)
-    #plt.plot(result)
-    #plt.show()
-    

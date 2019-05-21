@@ -20,8 +20,7 @@ class ConvolutionModule(torch.nn.Module):
     def forward(self, embedding):
         context = torch.matmul(embedding, self.weight_matrix)
         context += self.bias
-        representation = torch.sigmoid(context)
-        return representation
+        return context
 
 class AttentionModule(torch.nn.Module):
     """
